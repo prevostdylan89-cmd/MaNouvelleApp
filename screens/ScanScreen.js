@@ -1,87 +1,84 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ALL_EDITIONS } from '../constants';
-
-// Trier les éditions par ordre alphabétique
-const SORTED_EDITIONS = [...ALL_EDITIONS].sort((a, b) => a.localeCompare(b));
+import axios from 'axios';
+import { saveSearch } from '../services/historyService';
+import { getEnglishName } from '../data/pokemonNames';
 
 export default function ScanScreen({ navigation }) {
   const [name, setName] = useState('');
   const [number, setNumber] = useState('');
-  const [selectedEdition, setSelectedEdition] = useState(SORTED_EDITIONS[0]);
-  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const saveCard = async () => {
-    if (!name || !number) {
-      Alert.alert('Erreur', 'Remplissez le nom et le numéro');
+  const searchCard = async () => {
+    if (!name.trim() || !number.trim()) {
+      Alert.alert('Erreur', 'Veuillez entrer le nom du Pokémon et son numéro');
       return;
     }
 
-    setSaving(true);
+    setLoading(true);
     try {
-      const existing = await AsyncStorage.getItem('cards');
-      let cards = existing ? JSON.parse(existing) : [];
+      let cleanNumber = number.split('/')[0];
+      cleanNumber = cleanNumber.replace(/^0+/, '');
 
-      cards.push({
-        id: Date.now().toString(),
-        name: name,
-        number: number,
-        set: selectedEdition,
-        date: new Date().toISOString(),
-      });
+      // Traduction du nom français → anglais
+      const englishName = getEnglishName(name);
+      const query = `name:"${englishName}" number:${cleanNumber}`;
+      const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(query)}`;
+      const response = await axios.get(url);
+      const cards = response.data.data;
 
-      await AsyncStorage.setItem('cards', JSON.stringify(cards));
-
-      Alert.alert('Succès', 'Carte ajoutée', [{ text: 'OK', onPress: () => {
-        setName('');
-        setNumber('');
-        navigation.goBack();
-      }}]);
+      if (cards.length === 0) {
+        Alert.alert('Aucune carte', `Aucune carte trouvée pour "${name}" (recherché: ${englishName}) numéro ${cleanNumber}`);
+      } else if (cards.length === 1) {
+        const card = cards[0];
+        await saveSearch({ name: card.name, number: card.number, set: card.set.name });
+        navigation.navigate('PriceDashboard', {
+          cardName: card.name,
+          cardNumber: card.number,
+          cardSet: card.set.name,
+        });
+      } else {
+        const options = cards.slice(0, 5).map(card => ({
+          text: `${card.name} - ${card.set.name}`,
+          onPress: async () => {
+            await saveSearch({ name: card.name, number: card.number, set: card.set.name });
+            navigation.navigate('PriceDashboard', {
+              cardName: card.name,
+              cardNumber: card.number,
+              cardSet: card.set.name,
+            });
+          }
+        }));
+        Alert.alert('Plusieurs cartes trouvées', 'Choisissez la bonne carte :', options);
+      }
     } catch (error) {
-      Alert.alert('Erreur', error.message);
+      console.error(error);
+      Alert.alert('Erreur', 'Problème de connexion à l\'API Pokémon');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>Ajouter une carte</Text>
-
+      <Text style={styles.title}>Recherche manuelle</Text>
       <TextInput
         style={styles.input}
-        placeholder="Nom du Pokémon"
+        placeholder="Nom du Pokémon (ex: Dracaufeu, Pikachu)"
         value={name}
         onChangeText={setName}
+        autoCapitalize="words"
       />
-
       <TextInput
         style={styles.input}
-        placeholder="Numéro"
+        placeholder="Numéro de carte (ex: 25)"
         value={number}
         onChangeText={setNumber}
         keyboardType="numeric"
       />
-
-      <Text style={styles.label}>Édition :</Text>
-      <View style={styles.pickerContainer}>
-        <Picker
-          selectedValue={selectedEdition}
-          onValueChange={(itemValue) => setSelectedEdition(itemValue)}
-          style={styles.picker}
-        >
-          {SORTED_EDITIONS.map((edition) => (
-            <Picker.Item key={edition} label={edition} value={edition} />
-          ))}
-        </Picker>
-      </View>
-
-      <TouchableOpacity style={styles.saveButton} onPress={saveCard} disabled={saving}>
-        <Text style={styles.buttonText}>{saving ? 'Sauvegarde...' : '💾 Sauvegarder'}</Text>
+      <TouchableOpacity style={styles.searchButton} onPress={searchCard} disabled={loading}>
+        <Text style={styles.buttonText}>{loading ? 'Recherche...' : '🔍 Analyser les prix'}</Text>
       </TouchableOpacity>
-
       <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
         <Text style={styles.buttonText}>Retour</Text>
       </TouchableOpacity>
@@ -93,10 +90,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5', padding: 20 },
   title: { fontSize: 28, fontWeight: 'bold', color: '#4CAF50', textAlign: 'center', marginBottom: 30 },
   input: { backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', borderRadius: 10, padding: 12, fontSize: 16, marginBottom: 15 },
-  label: { fontSize: 16, fontWeight: 'bold', marginBottom: 5, marginTop: 10 },
-  pickerContainer: { backgroundColor: 'white', borderWidth: 1, borderColor: '#ddd', borderRadius: 10, marginBottom: 20 },
-  picker: { height: 50, width: '100%' },
-  saveButton: { backgroundColor: '#2196F3', padding: 15, borderRadius: 30, alignItems: 'center', marginTop: 20 },
-  backButton: { backgroundColor: '#e33535', padding: 15, borderRadius: 30, alignItems: 'center', marginTop: 15 },
+  searchButton: { backgroundColor: '#FF9800', padding: 15, borderRadius: 30, alignItems: 'center', marginBottom: 15 },
+  backButton: { backgroundColor: '#e33535', padding: 15, borderRadius: 30, alignItems: 'center' },
   buttonText: { color: 'white', fontWeight: 'bold', fontSize: 18 },
 });
