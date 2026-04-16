@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, TextInput, ScrollView } from 'react-native';
-import axios from 'axios';
 import { saveSearch } from '../services/historyService';
 import { getEnglishName } from '../data/pokemonNames';
 
@@ -17,18 +16,29 @@ export default function ScanScreen({ navigation }) {
 
     setLoading(true);
     try {
+      const englishName = getEnglishName(name.trim());
       let cleanNumber = number.split('/')[0];
       cleanNumber = cleanNumber.replace(/^0+/, '');
 
-      // Traduction du nom français → anglais
-      const englishName = getEnglishName(name);
       const query = `name:"${englishName}" number:${cleanNumber}`;
       const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(query)}`;
-      const response = await axios.get(url);
-      const cards = response.data.data;
+      const response = await fetch(url);
+      const data = await response.json();
+      let cards = data.data || [];
+
+      // Filtrer pour ne garder que les VRAIES cartes
+      cards = cards.filter(card => 
+        !card.name.toLowerCase().includes('box') &&
+        !card.name.toLowerCase().includes('deck') &&
+        !card.name.toLowerCase().includes('bundle') &&
+        !card.name.toLowerCase().includes('collection') &&
+        !card.name.toLowerCase().includes('blister') &&
+        !card.name.toLowerCase().includes('checklane') &&
+        card.supertype === 'Pokémon'
+      );
 
       if (cards.length === 0) {
-        Alert.alert('Aucune carte', `Aucune carte trouvée pour "${name}" (recherché: ${englishName}) numéro ${cleanNumber}`);
+        Alert.alert('Aucune carte', `Aucune carte trouvée pour "${name.trim()}" numéro ${cleanNumber}`);
       } else if (cards.length === 1) {
         const card = cards[0];
         await saveSearch({ name: card.name, number: card.number, set: card.set.name });
@@ -38,7 +48,7 @@ export default function ScanScreen({ navigation }) {
           cardSet: card.set.name,
         });
       } else {
-        const options = cards.slice(0, 5).map(card => ({
+        const options = cards.map(card => ({
           text: `${card.name} - ${card.set.name}`,
           onPress: async () => {
             await saveSearch({ name: card.name, number: card.number, set: card.set.name });

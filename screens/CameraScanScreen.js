@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert, Image, ScrollView, ActivityIndicator, TextInput } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import axios from 'axios';
 import { saveSearch } from '../services/historyService';
 import { getEnglishName } from '../data/pokemonNames';
 
@@ -56,13 +55,29 @@ export default function CameraScanScreen({ navigation }) {
     }
     setLoading(true);
     try {
+      // Traduire le nom français en anglais
       const englishName = getEnglishName(nameTrimmed);
-      const query = `name:"${englishName}" number:${cleanNumber}`;
-      const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(query)}`;
-      const response = await axios.get(url);
-      const cards = response.data.data;
+      console.log(`Recherche de "${nameTrimmed}" → traduction: "${englishName}"`);
+
+      let query = `name:"${englishName}" number:${cleanNumber}`;
+      let url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(query)}`;
+      let response = await fetch(url);
+      let data = await response.json();
+      let cards = data.data || [];
+
+      // Filtrer pour ne garder que les VRAIES cartes (pas les coffrets, deck, etc.)
+      cards = cards.filter(card => 
+        !card.name.toLowerCase().includes('box') &&
+        !card.name.toLowerCase().includes('deck') &&
+        !card.name.toLowerCase().includes('bundle') &&
+        !card.name.toLowerCase().includes('collection') &&
+        !card.name.toLowerCase().includes('blister') &&
+        !card.name.toLowerCase().includes('checklane') &&
+        card.supertype === 'Pokémon'
+      );
+
       if (cards.length === 0) {
-        Alert.alert('Aucune carte', `Aucune carte trouvée pour "${nameTrimmed}" (recherché: ${englishName}) n°${cleanNumber}`);
+        Alert.alert('Aucune carte', `Aucune carte trouvée pour "${nameTrimmed}" (recherché: "${englishName}") n°${cleanNumber}`);
       } else if (cards.length === 1) {
         const card = cards[0];
         await saveSearch({ name: card.name, number: card.number, set: card.set.name });
@@ -72,7 +87,7 @@ export default function CameraScanScreen({ navigation }) {
           cardSet: card.set.name,
         });
       } else {
-        const options = cards.slice(0, 5).map(card => ({
+        const options = cards.map(card => ({
           text: `${card.name} - ${card.set.name}`,
           onPress: async () => {
             await saveSearch({ name: card.name, number: card.number, set: card.set.name });
@@ -86,6 +101,7 @@ export default function CameraScanScreen({ navigation }) {
         Alert.alert('Plusieurs cartes trouvées', 'Choisissez la bonne carte :', options);
       }
     } catch (error) {
+      console.error(error);
       Alert.alert('Erreur', 'Problème de connexion à l\'API Pokémon');
     } finally {
       setLoading(false);
